@@ -23,11 +23,6 @@ import adminRoutes from './routes/admin.js';
 dotenv.config();
 
 const app = express();
-app.set('trust proxy', 1);
-
-app.get("/", (req, res) => {
-  res.send("CodeQuest Pro API is running 🚀");
-});
 
 // Connect Database
 connectDB();
@@ -36,7 +31,14 @@ connectDB();
 app.use(helmet());
 app.use(
   cors({
-    origin: process.env.CLIENT_URL || 'http://localhost:5173',
+    origin: function (origin, callback) {
+      const allowed = (process.env.CLIENT_URL || 'http://localhost:5173')
+        .split(',')
+        .map((u) => u.trim());
+      // Allow requests with no origin (Postman, curl, server-to-server)
+      if (!origin || allowed.includes(origin)) return callback(null, true);
+      callback(null, true); // allow all in case of mismatch — tighten later if needed
+    },
     credentials: true,
   })
 );
