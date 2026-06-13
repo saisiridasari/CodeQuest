@@ -17,15 +17,29 @@ export const register = async (req, res, next) => {
     const user = await User.create({ username, email, password });
     const otp = generateOTP();
     await OTP.create({ email, otp, type: 'verification', expiresAt: new Date(Date.now() + 10 * 60 * 1000) });
+
+    let emailSent = false;
     try {
       await sendOTPEmail(email, otp);
-    } catch {
-      /* email send failure is non-fatal in dev */
+      emailSent = true;
+    } catch (emailErr) {
+      console.error('❌ OTP email failed:', emailErr.message);
     }
+
+    // Always log OTP to server console so you can find it in Render logs
+    console.log(`\n🔑 OTP for ${email}: ${otp}\n`);
+
     res.status(201).json({
       success: true,
-      message: 'Registration successful. Please verify your email.',
-      data: { userId: user._id, email: user.email },
+      message: emailSent
+        ? 'Registration successful. Please check your email for the OTP.'
+        : 'Registration successful. Email delivery failed — check server logs for OTP.',
+      data: {
+        userId: user._id,
+        email: user.email,
+        // Return OTP in response only if email failed, so user isn't stuck
+        ...((!emailSent) && { otp, note: 'Email failed. Use this OTP to verify.' }),
+      },
     });
   } catch (error) {
     next(error);

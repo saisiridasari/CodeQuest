@@ -2,41 +2,55 @@ import nodemailer from 'nodemailer';
 
 let transporter = null;
 
-const getTransporter = () => {
-  if (transporter) return transporter;
-
-  if (!process.env.GMAIL_CLIENT_ID || !process.env.GMAIL_CLIENT_SECRET || !process.env.GMAIL_REFRESH_TOKEN) {
-    return null; // not configured
+const buildTransporter = () => {
+  // MODE 1: OAuth2
+  if (
+    process.env.GMAIL_CLIENT_ID &&
+    process.env.GMAIL_CLIENT_SECRET &&
+    process.env.GMAIL_REFRESH_TOKEN &&
+    process.env.EMAIL_USER
+  ) {
+    console.log('📧 Email: using Gmail OAuth2');
+    return nodemailer.createTransport({
+      service: 'gmail',
+      auth: {
+        type: 'OAuth2',
+        user: process.env.EMAIL_USER,
+        clientId: process.env.GMAIL_CLIENT_ID,
+        clientSecret: process.env.GMAIL_CLIENT_SECRET,
+        refreshToken: process.env.GMAIL_REFRESH_TOKEN,
+      },
+    });
   }
 
-  transporter = nodemailer.createTransport({
-    service: 'gmail',
-    auth: {
-      type: 'OAuth2',
-      user: process.env.EMAIL_USER,             // your Gmail address
-      clientId: process.env.GMAIL_CLIENT_ID,
-      clientSecret: process.env.GMAIL_CLIENT_SECRET,
-      refreshToken: process.env.GMAIL_REFRESH_TOKEN,
-    },
-  });
+  // MODE 2: App Password
+  if (process.env.EMAIL_USER && process.env.EMAIL_PASS) {
+    console.log('📧 Email: using Gmail App Password');
+    return nodemailer.createTransport({
+      service: 'gmail',
+      auth: {
+        user: process.env.EMAIL_USER,
+        pass: process.env.EMAIL_PASS,
+      },
+    });
+  }
 
+  console.warn('⚠️  Email: no credentials set — OTPs will print to console only');
+  return null;
+};
+
+const getTransporter = () => {
+  if (!transporter) transporter = buildTransporter();
   return transporter;
 };
 
-const sendMail = async ({ to, subject, html }) => {
+// ── Core send ────────────────────────────────────
+export const sendMail = async ({ to, subject, html }) => {
   const t = getTransporter();
 
   if (!t) {
-    // Fallback — print to console (visible in Render logs)
-    console.log('\n══════════════════════════════════════════');
-    console.log('  EMAIL NOT CONFIGURED — check Render env vars');
-    console.log(`  To: ${to} | Subject: ${subject}`);
-    const otpMatch = html.match(/font-family:monospace[^>]*>(\d{6})</);
-    const linkMatch = html.match(/href="([^"]*reset-password[^"]*)"/);
-    if (otpMatch) console.log(`  ✉  OTP: ${otpMatch[1]}`);
-    if (linkMatch) console.log(`  ✉  RESET LINK: ${linkMatch[1]}`);
-    console.log('══════════════════════════════════════════\n');
-    return;
+    logFallback(to, subject, html);
+    return { fallback: true };
   }
 
   try {
@@ -46,18 +60,43 @@ const sendMail = async ({ to, subject, html }) => {
       subject,
       html,
     });
-    console.log(`✅ Email sent to ${to} — MessageId: ${info.messageId}`);
+    console.log(`✅ Email sent → ${to} | id: ${info.messageId}`);
+    return { success: true, messageId: info.messageId };
   } catch (err) {
-    console.error(`❌ Email failed to ${to}:`, err.message);
-    // Still extract OTP/link to console so user isn't completely stuck
-    const otpMatch = html.match(/font-family:monospace[^>]*>(\d{6})</);
-    const linkMatch = html.match(/href="([^"]*reset-password[^"]*)"/);
-    if (otpMatch) console.log(`  FALLBACK OTP for ${to}: ${otpMatch[1]}`);
-    if (linkMatch) console.log(`  FALLBACK RESET LINK: ${linkMatch[1]}`);
+    console.error(`❌ Email FAILED → ${to}`);
+    console.error(`   Error: ${err.message}`);
+    if (err.response) console.error(`   SMTP Response: ${err.response}`);
+    logFallback(to, subject, html);
     throw err;
   }
 };
 
+const logFallback = (to, subject, html) => {
+  const otpMatch = html.match(/>(\d{6})<\/span>/);
+  const linkMatch = html.match(/href="([^"]*reset-password[^"]*)"/);
+  console.log('');
+  console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+  console.log(`📬 EMAIL FALLBACK — To: ${to}`);
+  console.log(`   Subject: ${subject}`);
+  if (otpMatch)  console.log(`   🔑 OTP CODE  : ${otpMatch[1]}`);
+  if (linkMatch) console.log(`   🔗 RESET URL : ${linkMatch[1]}`);
+  console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+  console.log('');
+};
+
+// ── Test connection (used by /api/health/email) ──
+export const testEmailConnection = async () => {
+  const t = getTransporter();
+  if (!t) return { ok: false, reason: 'No credentials configured' };
+  try {
+    await t.verify();
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, reason: err.message };
+  }
+};
+
+// ── Templates ───────────────────────────────────
 export const sendOTPEmail = async (email, otp) => {
   await sendMail({
     to: email,
@@ -69,7 +108,7 @@ export const sendOTPEmail = async (email, otp) => {
         <div style="background:#fff;border-radius:12px;padding:28px;text-align:center;margin:0 0 24px;border:1px solid #e8e8f0;">
           <span style="font-size:40px;font-weight:700;letter-spacing:10px;color:#2d3436;font-family:monospace;">${otp}</span>
         </div>
-        <p style="color:#636e72;font-size:13px;">Expires in <strong>10 minutes</strong>. Didn't request this? Ignore this email.</p>
+        <p style="color:#636e72;font-size:13px;">Expires in <strong>10 minutes</strong>.</p>
       </div>`,
   });
 };
