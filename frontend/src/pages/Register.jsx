@@ -21,8 +21,8 @@ export default function Register() {
     setLoading(true);
     try {
       await register({ username: form.username, email: form.email, password: form.password });
-      toast.success('Account created! Please verify your email.');
-      navigate('/verify-otp', { state: { email: form.email } });
+      toast.success('Account created! You can now log in.');
+      navigate('/login');
     } catch (err) {
       setError(err.response?.data?.message || 'Registration failed');
     } finally {
