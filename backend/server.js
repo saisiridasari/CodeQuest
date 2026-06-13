@@ -24,6 +24,11 @@ dotenv.config();
 
 const app = express();
 app.set('trust proxy', 1);
+
+app.get("/", (req, res) => {
+  res.send("CodeQuest Pro API is running 🚀");
+});
+
 // Connect Database
 connectDB();
 
@@ -70,9 +75,6 @@ app.get('/api/health', (_req, res) => res.json({ status: 'ok', timestamp: new Da
 
 // Error handling
 app.use(notFound);
-app.get("/", (req, res) => {
-  res.send("CodeQuest Pro API is running 🚀");
-});
 app.use(errorHandler);
 
 const PORT = process.env.PORT || 5000;
